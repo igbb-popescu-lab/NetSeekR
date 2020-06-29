@@ -7,8 +7,12 @@ Authors: Himangi Srivastava, Drew Ferrell, and George V. Popescu.
 
 Himangi Srivastava and Drew Ferrell contributed equally to this work.
 
-Set the working directory to the NetSeekR path.
+1. Set the working directory to the NetSeekR path.
+setwd(<<path/to/NetSeekR>>)
+2. Unzip the NetSeekR file.
+unzip('NetSeekR.zip')
+3. Load packages and source functions for NetSeekR.
+source('scripts/NetSeekR.R')
+4. Edit configuration file and sample comparison matrix.
+5.  
 
-### DO NOT RUN.
-#setwd(<<path/to/NetSeekR>>)
-###
