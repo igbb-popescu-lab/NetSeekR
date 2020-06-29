@@ -6,3 +6,9 @@ NetSeekR is a network analysis R package that includes the capacity to analyze t
 Authors: Himangi Srivastava, Drew Ferrell, and George V. Popescu.
 
 Himangi Srivastava and Drew Ferrell contributed equally to this work.
+
+Set the working directory to the NetSeekR path.
+
+### DO NOT RUN.
+#setwd(<<path/to/NetSeekR>>)
+###
