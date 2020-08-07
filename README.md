@@ -95,13 +95,30 @@ Below are the steps to run NetSeekR.
 
 
 
+5. Align batches of reads.
 
+`alignment_results <- implement_alignment(arguments_file = <<path/to/configuration file>>)`
 
+6. Test for differential gene expression.
 
+ * **note** An edited sample comparison matrix needs to be supplied for differential gene expression testing. An example of an edited sample comparison matrix file is below. A sample comparison matrix does not need headers, only sample identifiers. Which samples to compare in differential testing should be written row-wise. 
+ 
+|Example | | | | | |
+| --------------  |-------------| --------------  |-------------| --------------  |-------------|
+|SL209924    |SL209925    |SL209926    |SL209921    |SL209922    |SL209923|
+|SL209927    |SL209928    |SL209937    |SL209921    |SL209922    |SL209923|
+|SL209938    |SL209939    |SL209940    |SL209921    |SL209922    |SL209923|
+|SL209944    |SL209945    |SL209946    |SL209941    |SL209942    |SL209943|
+|SL209947    |SL209948    |SL209949    |SL209941    |SL209942    |SL209943|
+|SL209950    |SL209951    |SL209952    |SL209941    |SL209942    |SL209943|
 
+ 
+`implement_differential_gene_expression(alignment_results)`
 
-
-
-
-
-5. Execute pipeline with the three main functions: implement_alignment.R, implement_differential_expression.R, and implement_network_analysis.R, as per NetSeekR.html
+ * **note:** Sleuth is not available on the latest version of Bioconductor (3.10)
+ 
+ 7. Network analysis is then conducted assuming sets of differentially expressed genes are available.
+ 
+ `implement_network_analysis(alignment_tool = 'edgeR', alignment_results = alignment_results)`
+ 
+ The network analysis function above will produce an image of the network. The image can be saved from the ‘Export’ tab at the top of the window.
