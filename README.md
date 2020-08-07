@@ -43,7 +43,7 @@ Below are the steps to run NetSeekR.
 
 `source('scripts/NetSeekR.R')`  
 
-4. Edit configuration file and sample comparison matrix as per NetSeekR.html. 
+4. Edit configuration file and sample comparison matrix.
 
  * **note** Below is a template configuration file which needs to be edited per usage.
  
