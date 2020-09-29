@@ -42,10 +42,12 @@ implement_differential_gene_expression <- function(alignment_results){
     str_detect('star') %>% 
     any()
   
-  # Sleuth non-functional.
-  #if(kallisto){
-  #  implement_sleuth(alignment, pipeline_input, design_matrix, sample_comparisons, sample_covariates)
-  #}
+  ## Sleuth non-functional.
+  if(kallisto){
+    
+    #readline(prompt="Enter name: ")
+    implement_sleuth(alignment, pipeline_input, design_matrix, sample_comparisons, sample_covariates)
+  }
   
   if(STAR){
     implement_edgeR(alignment, pipeline_input, design_matrix, sample_comparisons)
@@ -160,12 +162,13 @@ implement_sleuth <- function(alignment, pipeline_input, design_matrix, sample_co
   
   # 
   sample_comparisons <- sample_comparisons %>%
-    unnest(cols = c(comparison_set)) %>% 
+    unnest(cols = comparison_set) %>% 
     left_join(quantification_files, by = 'sample') %>% 
     select(-path.x) %>% 
     dplyr::rename(path = path.y) %>% 
-    nest(data = c(sample, genotype, condition, hour, which_replicate, testing_condition, path)) %>% 
-    dplyr::rename(comparison_set = data) %>% 
+    drop_na() %>% 
+    nest(comparison_set = -file_name) %>% 
+    #nest(data = c(sample, genotype, condition, hour, which_replicate, testing_condition, path)) %>% 
     mutate(
       testing_condition = map(comparison_set, 
                               structure_covariates_for_DGE_testing,
@@ -201,18 +204,18 @@ implement_sleuth <- function(alignment, pipeline_input, design_matrix, sample_co
   analysis_type <- pipeline_input %>% 
     extract2('analysis_type')
   
-  sleuth_level_directories <- tibble(sleuth_path, transcript_level, gene_level, transcript_and_gene_level) %>% 
+  sleuth_level_directories <- tibble(sleuth_path, transcript_level, gene_level, transcript_and_gene_level) %>%
     mutate(
       transcript_level = case_when(transcript_level ~ paste0(sleuth_path, analysis_type, '/transcript_level/')
       ),
       gene_level = case_when(gene_level ~ paste0(sleuth_path, analysis_type, '/gene_level/')
       )
     ) %>% 
-    gather() %>% 
+    gather() %>%
     filter(
       str_detect(value, paste0('Sleuth/', analysis_type)
       )
-    ) %>% 
+    ) %>%  
     mutate(
       write_directory = map(value, 
                             dir.create,
@@ -224,7 +227,7 @@ implement_sleuth <- function(alignment, pipeline_input, design_matrix, sample_co
   
   if(transcript_and_gene_level | gene_level){
     target_mapping <- design_matrix %>%
-      slice(1) %>% 
+      slice(1) %>%
       gene_level_analysis_data_structure() %>% 
       select(ttg) %>%
       unnest()
@@ -238,10 +241,10 @@ implement_sleuth <- function(alignment, pipeline_input, design_matrix, sample_co
     )
   
   if(transcript_and_gene_level){
-    transcript_comparisons <- sample_comparisons %>% slice(1:2) %>% 
+    transcript_comparisons <- sample_comparisons %>% 
       transcript_prep() 
     
-    gene_comparisons <- sample_comparisons %>% slice(1:2) %>% 
+    gene_comparisons <- sample_comparisons %>% 
       gene_prep(target_mapping)
     
     comparisons <- bind_rows(transcript_comparisons, gene_comparisons)
@@ -306,10 +309,12 @@ structure_covariates_for_DGE_testing <- function(comparison_set, sample_conditio
   comparison_set <- comparison_set %>% 
     extract(col = condition, 
             into = sample_conditions, 
-            regex = rep('(.*)', times = condition_count) %>% 
+            regex = rep('(.*)', times = condition_count) %>%
               paste(collapse = ' ')
     ) %>% 
-    select(sample_conditions) %>% 
+    select(
+      all_of(sample_conditions)
+    ) %>% 
     distinct()
   
   row_num <- comparison_set %>% 
@@ -464,7 +469,7 @@ extract_single_testing_condition <- function(sample_conditions){
   }
 
   sample_conditions %>%
-    anti_join(key_no_variance) %>%
+    anti_join(key_no_variance, by = 'key') %>%
     ungroup() %>%
     select(key) %>%
     unlist(use.names = FALSE) %>%
@@ -477,7 +482,7 @@ extract_single_testing_condition <- function(sample_conditions){
 
 # Function name: transcript_prep
 # Purpose: A Sleuth_prep implementation specific
-#          to transcript analaysis. 
+#          to transcript analysis. 
 # Input: A sample comparison set. 
 # Output: Sleuth prep object. 
 transcript_prep <- function(comparisons){
@@ -625,15 +630,14 @@ save_sleuth_results <- function(results, level_path, file_name){
 # Purpose: Conduct differential testing on STAR
 #          mapped reads with edgeR.
 # Input: Alignment decision data structure, processed configuration
-#        file, experimental design matrix, and sample comparison sets.
+#        file, experimental design matrix, and sample comparison sets. 
 implement_edgeR <- function(alignment, pipeline_input, design_matrix, sample_comparisons){
   STAR_counts_path <- alignment %>%  
     filter(key == 'star') %>%  
     select(directories) %>% 
     unlist(use.names = FALSE) %>% 
     str_subset(pattern = 'Feature_counts') %>% 
-    list.files(full.names = TRUE) %>% 
-    str_subset(pattern = 'clean_counts.txt$')
+    list.files(full.names = TRUE) 
   
   design_matrix <- design_matrix %>%
     mutate(
@@ -644,7 +648,7 @@ implement_edgeR <- function(alignment, pipeline_input, design_matrix, sample_com
     tibble(files = .) %>%
     mutate(
       # Select the column one and column two from feature counts data; to be ran with submitted data.
-      counts_data = map(files, ~read_tsv(.x, col_names = TRUE, skip = 1, col_types = cols()) %>% select(1, 2)
+      counts_data = map(files, ~read_tsv(.x, col_names = TRUE, skip = 1, col_types = cols()) %>% dplyr::select(1, 2)
       )
     ) %>%
     filter_counts_data(design_matrix = design_matrix) %>%
@@ -693,7 +697,7 @@ filter_counts_data <- function(counts, design_matrix){
 edgeR_preliminary <- function(count_keeps, samplename, edgeR_directory, comparisons, pipeline_input){
   
   edgeR_output_directory <- edgeR_directory %>% 
-    first() %>% 
+    dplyr::first() %>% 
     str_replace(pattern = 'STAR.*', replacement = 'edgeR/') %>% 
     paste0(pipeline_input$analysis_type, '/')
   
@@ -727,7 +731,7 @@ edgeR_preliminary <- function(count_keeps, samplename, edgeR_directory, comparis
       make_contrasts = map(all, ~makeContrasts(contrasts = .x, levels = group)),
       vfit = map(make_contrasts, ~contrasts.fit(fit = vfit, contrasts = .x)),
       tfit = map(vfit, ~treat(fit = .x, lfc = pipeline_input$edger_lfc %>% as.numeric())),
-      dt = map(tfit, ~decideTests(object = .x, method = pipeline_input$edger_method, adjust.method = pipeline_input$edger_adjustment_method, p.value = pipeline_input$significance_cutoff)),
+      dt = map(tfit, ~decideTests(object = .x, adjust.method = pipeline_input$edger_adjustment_method, p.value = pipeline_input$significance_cutoff)),
       top_tables = map2(tfit, all, ~topTable(fit = .x, coef = .y, sort.by = 'p', n = 'Inf')),
       write_out = map2(top_tables, C, ~write_tsv(x = .x, path = paste0(edgeR_output_directory, .y, '.tsv')))
     )
