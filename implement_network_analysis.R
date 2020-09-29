@@ -9,7 +9,7 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
   alignment_decision <- alignment_results %>% 
     dplyr::first()
   pipeline_input <- alignment_results %>% 
-    dplyr::last()
+    dplyr::last() 
   
   # WGCNA
   if(alignment_tool %>% str_detect('kallisto|KALLISTO|Kallisto')){
@@ -62,7 +62,15 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
   }
   
   message('Running WGCNA.')
-  expr2 <- wgcna_input_data(wgcna_input, pipeline_input) %>% 
+  
+  expr2 <- wgcna_input_data(wgcna_input, pipeline_input) 
+  
+  significant_hits <- expr2 %>% 
+    select(original_filter) %>% 
+    unnest(cols = original_filter) %>% 
+    distinct()
+  
+  expr2 <- expr2 %>% 
     wgcna_plot_sample_tree() %>% 
     wgcna_plot_power_results() %>% 
     wgcna_plot_power_histogram() %>% 
@@ -80,13 +88,217 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
   
   # DREM
   message('Writing executable files for DREM.')
-  DREM_main(pipeline_input = pipeline_input, wgcna_input = wgcna_input, execute)
+  time_series_count_data <- DREM_main(pipeline_input = pipeline_input, wgcna_input = wgcna_input, significant_hits, execute)
   # Overlap differentially expressed genes with network
-  DREM_network_overlap(pipeline_input)
+  DREM_network_overlap(pipeline_input, deg_files)
   
   message('Conducting network analysis.')
   network_analysis_results <- mapping_network_analysis(expr2)
+  
+  adjacency_matrices <- expr2 %>% 
+    mutate(
+      comparison_adj_mat = map(clustering, ~.x$adjacency)
+    ) %>% 
+    select(comparison, comparison_adj_mat) %>% 
+    mutate(
+      gene_tf = map(comparison_adj_mat, map_gene_tf_network_analysis, pipeline_input)
+    )
+  
+  
 }
+
+
+
+
+
+
+map_gene_tf_network_analysis <- function(adj_mat, pipeline_input){
+  
+  setwd(paste0(getwd(), '/data/DREM/', pipeline_input$analysis_type))
+  
+  paths <- getwd() %>% 
+    list.files(pattern = 'path', full.names = T) %>% 
+    tibble(path_file = .) %>% 
+    dplyr::mutate(
+      path_data = map(path_file, vroom, col_types = cols()),
+      path_data = map(path_data, ~select(.x, !contains('SPOT') & !starts_with('H'))),
+      path_data = map(path_data, ~set_colnames(.x, gsub("\\|.*","", colnames(.x))))
+    ) 
+  
+  tf_list <- '../../../Ath_TF_list.txt'
+  
+  paths <- paths %>% 
+    mutate(
+      tmp = purrr::map(path_data, 
+                       gene_tf_network_analysis, 
+                       adj_mat, 
+                       tf_list
+      )
+    )
+  
+  
+}
+
+  
+  
+
+
+gene_tf_network_analysis <- function(drem_gene_tf, adj_mat, tf_list){
+  
+  #drem_gene_tf=read.table("gene_tf_table.txt",header = TRUE)
+ 
+  
+  
+  
+  ids = drem_gene_tf %>% 
+    select(1) 
+  
+  drem_gene_tf <- as.data.frame(drem_gene_tf)
+  
+  
+  rownames(drem_gene_tf)=drem_gene_tf[,1]
+  drem_gene_tf<- drem_gene_tf[,-1]
+  rr=drem_gene_tf[rowSums(drem_gene_tf)>2,]
+  rr=rr[,colSums(rr)>2]
+  
+  
+  g <- graph.incidence(rr)
+  V(g)$color <- V(g)$type
+  V(g)$color=gsub("FALSE","red",V(g)$color)
+  V(g)$color=gsub("TRUE","blue",V(g)$color)
+  tkp.id<-tkplot(g, edge.color="gray30", layout=layout_as_bipartite)
+  
+  tk_center(tkp.id)
+  #tk_fit(tkp.id, width = 467, height = 567)
+  #tk_rotate(tkp.id, degree = -90, rad = NULL)
+  
+  
+  types_drem <- V(g)$type                 ## getting each vertex `type` let's us sort easily
+  degree_drem <- igraph::degree(g)
+  betweenness_drem<- betweenness(g)
+  closeness_drem <- closeness(g)
+  eig_drem <- eigen_centrality(g)$vector
+  
+  centrality_drem <- data.frame(types_drem , degree_drem, betweenness_drem, closeness_drem, eig_drem)
+  
+  centrality_drem[order(centrality_drem$types_drem, decreasing = TRUE),]
+  
+  #adj_m <- adj_mat[(rownames(adj_mat)%in% ids),]
+  
+  adjacancy_matrix_of_drem_TF <- adj_mat[(rownames(adj_mat) %in% ids),]
+  
+  #adjacency mtrix for drem TF data that matches with genes
+  adjacancy_matrix_of_drem_TF = adj_mat[,colnames(adj_mat)[colnames(adj_mat) %in% colnames(drem_gene_tf)]]
+  
+  
+  
+  ath_tf_list=read.table(tf_list, header = TRUE)
+  ath_tf_list=gsub("\\..*","",ath_tf_list$TF_ID)
+  ath_tf_list=as.data.frame(unique(ath_tf_list))
+  #colnames(ath_tf_list)="TFs"
+  #adjacancy matrix of database TF data that matches with genes
+  adjacancy_matrix_of_database_TF=adj_mat[,colnames(adj_mat)[colnames(adj_mat) %in% ath_tf_list]]
+  
+  
+  data_tf_gene_corr <- unique(cbind(adjacancy_matrix_of_database_TF,adjacancy_matrix_of_drem_TF))
+  
+  
+  m <- data_tf_gene_corr
+  source_node=c()
+  target_node=c()
+  correlation<-c()
+  genes_names <- rownames(data_tf_gene_corr)
+  tf_names<-colnames(data_tf_gene_corr)
+  i<-genes_names[1:dim(m)[1]]
+  j<-tf_names[1:dim(m)[2]]
+
+  for(gene in i)
+  {
+    for(gen in j)
+    {
+      if(m[gene,gen]>0.5){
+        source_node<-c(source_node,gene)
+        target_node<-c(target_node,gen)
+        correlation<-c(correlation,m[gene,gen])
+      }
+    }
+  }
+  
+  
+  
+  NetworkData <- data.frame(source_node, target_node, correlation)
+  
+  
+  net=NetworkData %>% filter(correlation > 0.5)
+  net=net %>% filter(correlation != 1)
+  
+  net=unique(net)
+  
+  g <- graph.empty(directed = F)
+  node.out <- unique(net$target_node) #stringsAsFactor = F in data frame
+  node.in <- unique(net$source_node) #stringsAsFactor = F in data frame
+  g <- graph.data.frame(net, directed = F)
+  V(g)$type <- V(g)$name %in% net[,2] #the second column of edges is TRUE type
+  E(g)$weight <- as.numeric(net[,3])
+  g
+  
+  rr=get.incidence(g,attr = "weight")
+  
+  
+  
+  V(g)$color <- V(g)$type
+  V(g)$color=gsub("FALSE","red",V(g)$color)
+  V(g)$shape=gsub("FALSE","square",V(g)$shape)
+  V(g)$color=gsub("TRUE","blue",V(g)$color)
+  tkplot(g, edge.color="gray30",edge.width=E(g)$weight, layout=layout_as_bipartite)
+  
+  
+  types <- V(g)$type    
+  deg <- igraph::degree(g)
+  bet <- betweenness(g)
+  clos <- closeness(g)
+  eig <- eigen_centrality(g)$vector
+  
+  cent_df <- data.frame(types, deg, bet, clos, eig)
+  
+  cent_df[order(cent_df$type, decreasing = TRUE),]
+}
+  
+  #quantile foreach gene -TF relationship
+  # q <- vector()
+  # for (i in 1:length(data_tf_gene_corr)){
+  #   q[i]<- quantile(data_tf_gene_corr[,i],  probs = 0.9)
+  #   
+  # }
+  # 
+  
+  
+  
+  
+  # adj_mat=read.table("gene-gene_adj.txt",header = TRUE)
+  # row.names(adj_mat)=adj_mat$Column1
+  # adj_mat=adj_mat[,-1]
+  # 
+  # 
+  # row.names(adj_mat)=adj_mat$Column1
+  # adj_mat=adj_mat[,-1]
+  # 
+  #adj<-as.data.frame(adjacency)
+  #adj<-adj_mat
+  
+  #since DREM filters some data so we will keep the genes that are not filtered by DREM
+  #drem_gene_tf=read.table("ILK_path1.txt",header = TRUE)
+  #drem_gene_tf = select_if(!contains('SPOT', 'H[[:digit:]]+'))
+    
+    
+    #drem_gene_tf[,-(2:6)]
+  
+  #colnames(paths$path_data[[1]]) = gsub("\\|.*","", colnames(paths$path_data[[1]]))
+  
+  
+
+
+
 
 
 
@@ -99,7 +311,7 @@ DREM_network_overlap <- function(p, d){
   # point to network directory
   nets <- p %>% 
     extract2('DREM') %>% 
-    paste0('/TFInput') 
+    paste0('TFInput') 
   # list potential networks to access
   
   net_full <- nets %>% 
@@ -126,13 +338,15 @@ DREM_network_overlap <- function(p, d){
     rownames_to_column() %>% 
     dplyr::rename('item' = rowname, 'network' = value)
   # print selection menu
-  net_select
+  print(net_select)
   # input selection item
   chosen_item <- readline('Type item number: ')
+  
   # extract network file name
   net <- net_select %>% 
     spread(item, network) %>% 
     select(all_of(chosen_item))
+  
   # extract full path to network chosen
   path_to_chosen_net <- net_full[str_detect(net_full, net %>% unlist(use.names = F))]
   # check which tool
@@ -185,10 +399,10 @@ DREM_network_overlap <- function(p, d){
     ) %>% 
     select(-de_gene_sets)
   # unzip if needed
-  if (str_detect(string = path_to_chosen_net, '.gz$')){
-    untar(zipfile = path_to_chosen_net)
-    path_to_chosen_net <- path_to_chosen_net %>% str_remove('.gz')
-  }
+  # if (str_detect(string = path_to_chosen_net, '.gz$')){
+  #   unzip(zipfile = path_to_chosen_net)
+  #   path_to_chosen_net <- path_to_chosen_net %>% str_remove('.gz')
+  # }
   
   network <- read.delim(path_to_chosen_net) %>% 
     select(all_of(target_source), all_of(target))
@@ -304,7 +518,7 @@ DREM_network_overlap <- function(p, d){
     )
   
   tmp <- getwd() %>% paste0('/data/', p$analysis_type, '_DEG_networks')
-  dir.create(tmp)
+  dir.create(tmp, recursive = T)
   
   expression_networks <- node_overlap %>%
     mutate(
@@ -399,7 +613,7 @@ beta_and_read_mapping_to_nodes <- function(target_source_set, node_type_1, node_
   node_type_2_set <- c(node_type_2, paste0(node_type_2, '_', summarise_col), paste0(node_type_2, '_mean_counts'))
   
   target_source_set %>% 
-    nest(node_type_1_set, node_type_2_set) %>% 
+    nest(data = c(node_type_1_set, node_type_2_set)) %>% 
     dplyr::rename(tmp := data) %>% 
     dplyr::select(tmp) %>% 
     mutate(
@@ -454,6 +668,8 @@ overlap_targets <- function(differential_gene_expression_set, target_sources, no
 }
 
 
+
+
 overlap_sources <- function(differential_gene_expression_set, edges, node_type, summarise_col){
   differential_gene_expression_set %>% 
     rename(!!node_type := target_id) %>%
@@ -464,8 +680,11 @@ overlap_sources <- function(differential_gene_expression_set, edges, node_type, 
 }
 
 
+
+
 average_counts_across_comparison_sets <- function(est_count_set){
   est_count_set %>% 
+    rename(target_id = 1, counts = 2, counts1 = 4) %>% 
     select(ends_with('id'), contains('counts')) %>% 
     mutate(
       mean_counts = map2_dbl(counts, counts1, ~mean(x = c(.x, .y)))
@@ -611,7 +830,7 @@ extract_condition_column_number <- function(extracted_title_dataset){
 
 
 
-unique_and_relabel <- function(edges, label_name){
+unique_and_relabel <- function(edges, label_name){ 
   edges %>%
     distinct(!!sym(label_name)) %>% 
     rename(label = !!label_name)
@@ -669,7 +888,7 @@ wgcna_input_data <- function(differentialy_expressed_genes, pipeline_input){
     file_name_pattern <- 'clean_counts'
     
     # Select the directory which contains the count data from STAR.
-    counts_data <- differentialy_expressed_genes %>% 
+    counts_data <- differentialy_expressed_genes %>%
       str_replace('edgeR.*', 'STAR/Feature_counts/')
     
   } 
@@ -690,7 +909,8 @@ wgcna_input_data <- function(differentialy_expressed_genes, pipeline_input){
     
     # Read count data into environment; use explicit patterns
     # which allow distinctions between counts datasets.
-    counts_keep(file_name_pattern, recurse_subdirectories = !edgeR_tool) %>%
+    counts_keep(file_name_pattern, recurse_subdirectories = !edgeR_tool) %>% 
+    
     
     # Map count data to sample names from design matrix.
     #associate_counts_with_sample_names(design_matrix) %>%
@@ -713,6 +933,7 @@ wgcna_input_data <- function(differentialy_expressed_genes, pipeline_input){
   # Load differential gene expression data.
   differentially_expressed_genes_keep(differentialy_expressed_genes, filter_value, pipeline_input) %>%
     mutate(
+      original_filter = deg_data2,
       deg_data2 = map(deg_data2,
                       ~suppressMessages(semi_join(keep_counts, .x))
       ),
@@ -720,6 +941,8 @@ wgcna_input_data <- function(differentialy_expressed_genes, pipeline_input){
                                    wgcna_data_processing
       )
     )
+  
+
 }
 
 
@@ -912,7 +1135,7 @@ read_and_filter <- function(differentialy_expressed_genes_sets, filter_value, pi
 # Output: Plotted sample tree.
 wgcna_plot_sample_tree <- function(Expression_data0){
   
-  Expression_data0 %>% 
+  Expression_data0 %>%
     mutate(
       sample_tree = map(preprocess_wgcna_input,
                         hclust_distance_matrix,
@@ -1189,7 +1412,7 @@ clustering <- function(sample_clustering, file_path){
 #          and performs GO analysis.
 # Input: String specifying which tool was used; alignment results
 #        structure.
-# Output: GO enrichment results. 
+# Output: GO enrichment results.
 implement_GO_enrichment <- function(deg_tool, alignment_results){
   
   alignment_decision <- alignment_results %>% 
@@ -1367,7 +1590,7 @@ post_process_GO_results <- function(GO_results){
 # Purpose: Extract required data for executing DREM.
 # Input: Pipeline input structure, wgcna_input.
 # Output: None
-DREM_main <- function(pipeline_input, wgcna_input, exec){
+DREM_main <- function(pipeline_input, wgcna_input, sig, exec){
   
   analysis_type <- pipeline_input %>%
     extract2('analysis_type')
@@ -1392,7 +1615,7 @@ DREM_main <- function(pipeline_input, wgcna_input, exec){
   design_matrix <- pipeline_input %>% 
     extract2('design_matrix') 
   
-  drem_time_series_input_path <- getwd() %>% 
+  drem_time_series_input_path <- getwd() %>%
     paste0('/data/DREM/', analysis_type, '/')
   
   
@@ -1400,7 +1623,8 @@ DREM_main <- function(pipeline_input, wgcna_input, exec){
   
   drem_defaults_template <- pipeline_input %>% 
     extract2('DREM') %>% 
-    paste0('/defaults.txt')
+    paste0('/defaults.txt') %>% 
+    str_replace('//', '/')
   
   
   design_matrix <- design_matrix %>% 
@@ -1410,16 +1634,21 @@ DREM_main <- function(pipeline_input, wgcna_input, exec){
   
   loaded_read_data <- load_read_data(map_dir, design_matrix, dataset)
   
-  time_series_count_data <- rearrange_count_data(loaded_read_data, pipeline_input$sample_covariates) %>% 
+  tmp <- rearrange_count_data(loaded_read_data, pipeline_input$sample_covariates) %>% 
+    # reduce by sig hits
+    mutate(
+      reads = map(data, right_join, sig, by = 'target_id')
+    )
+  
+  time_series_count_data <- tmp %>% 
     write_DREM_time_series_data(., pipeline_input, drem_time_series_input_path) %>% 
     write_default_files(defaults_template = drem_defaults_template) %>% 
-    ungroup()
+    ungroup() 
   
   
   DREM <- pipeline_input %>% 
-    extract2('DREM') %>% 
+    extract2('DREM') %>%
     list.files(pattern = '*.jar', full.names = T)
-  
   
   # Execute DREM script.
   DREM_command_line <- paste('java -mx1024M -jar', DREM, '-b')
@@ -1433,7 +1662,7 @@ DREM_main <- function(pipeline_input, wgcna_input, exec){
       ),
       file = str_replace(command, '^.* (.*)$', '\\1') %>% 
         str_replace('.txt$', '_outfile.txt'),
-      command_complete = paste(command, file) 
+      command_complete = paste(command, file)
     ) %>% 
     select(command_complete) %>% 
     unlist(use.names = F)
@@ -1447,9 +1676,43 @@ DREM_main <- function(pipeline_input, wgcna_input, exec){
   writeLines(DREM_execute, drem_script)
   
   close(drem_script)
-  if (exec){
-    system(drem_script_location)
+  
+  previous_dir <- getwd()
+  setwd(pipeline_input$DREM)
+  
+  message('Currently running DREM. \n')
+  
+  for(i in seq_along(DREM_execute)){
+    current <- DREM_execute[[i]] %>% 
+      str_extract('-b .*defaults.txt') %>% 
+      basename() %>% 
+      paste0('Generated defaults file: ', .)
+    
+    out <- DREM_execute[[i]] %>% 
+      stri_reverse() %>% 
+      gsub(pattern = ' .*', replacement = '') %>% 
+      stri_reverse() %>%
+      basename()
+    
+    message(current)
+    message('DREM configuration file: ', out)  
+    system(DREM_execute[[i]], show.output.on.console = T)
   }
+  
+  for(i in seq_along(DREM_execute)){
+    current <- DREM_execute[[i]] %>% 
+      str_extract('-b .*defaults.txt') %>% 
+      basename()
+    system(paste0('java -mx1024M -jar drem.jar'))
+    
+  }
+  
+  
+  #if (exec){
+  #  system(drem_script_location)
+  #}
+  setwd(previous_dir)
+  return(tmp)
   
 }
 
@@ -1586,7 +1849,7 @@ write_default_files <- function(reformatted_counts, defaults_template){
   
   
   # load original defaults file from DREM2.
-  defaults_file <- defaults_template %>% 
+  defaults_file <- defaults_template %>%
     read.delim(row.names = NULL) %>% 
     as_tibble() %>% 
     mutate_if(is.factor, as.character)
@@ -1633,18 +1896,21 @@ insert_DREM_input_to_defaults <- function(condition_data, defaults_file){
   
   
   replicate_file <- condition_data %>% 
-    select(file_name)
+    ungroup() %>% 
+    select(file_name) 
   
+  defaults_file <- defaults_file %>% 
+    rename(a = 1, b = 2)
   
-  defaults_file$X.Main.Input.[3] <- replicate_file %>% 
+  defaults_file$b[3] <- replicate_file %>% 
     slice(1)
   
-  defaults_file$X.Main.Input.[13] <- replicate_file %>% 
+  defaults_file$b[12] <- replicate_file %>% 
     slice(2:total_replicates) %>% 
     unlist(use.names = FALSE) %>% 
     str_c(collapse = ',')
   
-  return(defaults_file %>% unnest(X.Main.Input.))
+  return(defaults_file %>% unnest(b))
 }
 
 
@@ -1656,9 +1922,10 @@ insert_DREM_input_to_defaults <- function(condition_data, defaults_file){
 write_new_default_file_name <- function(genotype, condition, drem_data){
   
   file_name <- drem_data %>% 
+    ungroup() %>% 
     select(file_name) %>% 
     first() %>% 
-    str_replace('[:digit:].tsv$', 'defaults.txt') %>% 
+    str_replace('.tsv$', 'defaults.txt') %>% 
     first()
   
   return(file_name)
