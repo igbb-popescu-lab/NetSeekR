@@ -136,7 +136,7 @@ decide_alignment_tool <- function(pipeline_input){
       directories = map2(key, value, 
                          
                          # Determine which directory tree(s) to create.
-                         ~case_when(.x == 'kallisto' ~ pipeline_input %>% 
+                         ~dplyr::case_when(.x == 'kallisto' ~ pipeline_input %>% 
                                       extract2('kallisto_output_dir') %>% 
                                       write_kallisto_directory_tree,
                                     
@@ -234,7 +234,7 @@ assemble_alignment_arguments <- function(alignment, pipeline_input){
     mutate_at(
       vars(key), 
       list(
-        ~(if_else(condition = .x %>% is_in(k_equals), 
+        ~(dplyr::if_else(condition = .x %>% is_in(k_equals), 
                   true = .x %>% paste0('='), 
                   false = .x)
         )
@@ -317,13 +317,13 @@ implement_kallisto <- function(Kallisto_arguments, directories, execute_script){
     mutate_at(
       vars(quant, index), 
       list(
-        ~if_else(condition = str_detect(key, 'index'), true = TRUE, false = .x)
+        ~dplyr::if_else(condition = str_detect(key, 'index'), true = TRUE, false = .x)
       )
     ) %>% 
     mutate_at(
       vars(index), 
       list(
-        ~if_else(condition = str_detect(key, 'path'), true = TRUE, false = .x)
+        ~dplyr::if_else(condition = str_detect(key, 'path'), true = TRUE, false = .x)
       )
     )
   
