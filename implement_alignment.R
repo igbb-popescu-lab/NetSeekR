@@ -19,7 +19,7 @@ implement_alignment <- function(arguments_file, execute_script){
   
   # Extract paths to all written directories.
   alignment_directories <- alignment_decision %>% 
-    select(directories) %>% 
+    dplyr::select(directories) %>% 
     unlist(use.names = FALSE)
   
   # Map over elements and create each directory.

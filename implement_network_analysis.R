@@ -34,11 +34,11 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
       tibble(deg_file = .)
     
     test_for_extraneous <- deg_files %>% 
-      slice(1) %>% 
-      unlist() %>% 
+      use_series(deg_file) %>% 
+      first() %>% 
       read_tsv(col_types = cols()) %>%
-      select(target_id) %>% 
-      slice(1) %>%
+      use_series(target_id) %>% 
+      first() %>% 
       unlist(use.names = FALSE)
     
     # str matching specific to test data.
@@ -361,7 +361,7 @@ DREM_network_overlap <- function(p, d){
     
     # Select the directory which contains the count data from STAR.
     counts_data <- d %>% 
-      slice(1) %>% 
+      dplyr::slice(1) %>% 
       first() %>% 
       str_replace(pattern = 'edgeR.*', replacement = 'STAR/Feature_counts/')
     
@@ -390,7 +390,7 @@ DREM_network_overlap <- function(p, d){
       de_gene_sets = map(deg_file, ~read_tsv(.x, col_types = cols()) %>% 
                            drop_na() %>% 
                            filter(!!sym(pval_filter) <= p %>% extract2('significance_cutoff'))
-                         
+                        
       ),
       summarised_de_gene_sets = map(de_gene_sets, 
                                     ~summarise_differential_expression(differential_expression_gene_set = .x, gene_column = gene_col, mean_summerize = summarise_by)
@@ -407,7 +407,7 @@ DREM_network_overlap <- function(p, d){
   network <- read.delim(path_to_chosen_net) %>% 
     select(all_of(target_source), all_of(target))
   # Make network edges unique.
-  edge_list <- network %>%
+  edge_list <- network %>% 
     mutate(
       !!target_source := !!sym(target_source) %>% map(extract_edges)
     ) %>%
@@ -418,7 +418,7 @@ DREM_network_overlap <- function(p, d){
   
   # Extract unique source nodes. 
   unique_sources <- edge_list %>% 
-    unique_and_relabel(label_name = target_source)
+    unique_and_relabel('label_name' = target_source)
   
   # Extract unique target nodes. 
   unique_targets <- edge_list %>% 
@@ -431,9 +431,9 @@ DREM_network_overlap <- function(p, d){
   # Associate unique gene ids with edges. 
   edge_list_ids <- edge_list %>%
     left_join(all_nodes, by = setNames(nm = target_source, 'label')) %>%
-    rename(from = id) %>% 
+    dplyr::rename(from = id) %>% 
     left_join(all_nodes, by = setNames(nm = target, 'label')) %>%
-    rename(to = id)
+    dplyr::rename(to = id)
   
   
   # Number of columns the extracted title can be divided into.
@@ -541,8 +541,8 @@ graph_differential_gene_expression_network <- function(nodes, edges, label_types
   as_tbl_graph(nodes, edges %>% unlist()) %>%
     activate(nodes) %>%
     left_join(label_types, by = 'name') %>%
-    rename('Identifier' = name) %>%
-    rename('Class' = label) %>% 
+    dplyr::rename('Identifier' = name) %>%
+    dplyr::rename('Class' = label) %>% 
     ggraph(layout = 'kk') +
     geom_edge_link(arrow = arrow(length = unit(3, 'mm'))) +
     geom_node_point(aes(alpha = scaled_beta, colour = Identifier, size = reads, shape = Beta_coefficient)) +
@@ -560,7 +560,7 @@ paste_and_save <- function(output_directory, file_name_to_paste, graph){
     paste0('/', file_name_to_paste, '.png') 
   
   graph %>% 
-    ggsave(filename = output_directory, device = 'png', dpi = 320)
+    ggsave(filename = output_directory, device = 'png', dpi = 320, width = 10.00, height = 10.00, units = 'in')
   
 }
 
@@ -589,7 +589,7 @@ label_and_rescale_mapped_values <- function(mapped_values_set, edges, first_labe
   
   mapped_values_set %>%
     left_join(x = ., y = edges, by = c('name' = first_label)) %>%
-    rename(!!first_label := second_label) %>%
+    dplyr::rename(!!first_label := second_label) %>%
     
     
     mutate_at(first_label, ~if_else(condition = is.na(.),
@@ -597,7 +597,7 @@ label_and_rescale_mapped_values <- function(mapped_values_set, edges, first_labe
                                     false = replace(x = ., values = first_label)
     )
     ) %>%
-    rename(label := !!first_label) %>%
+    dplyr::rename(label := !!first_label) %>%
     distinct()
 }
 
@@ -630,7 +630,7 @@ beta_and_read_mapping_to_nodes <- function(target_source_set, node_type_1, node_
     ) %>%
     spread(ind, value) %>%
     dplyr::select(-id) %>%
-    rename(name = '1', beta = '2', reads = '3') %>%
+    dplyr::rename(name = '1', beta = '2', reads = '3') %>%
     mutate_at(vars(beta, reads), as.numeric) %>% 
     distinct()
 }
@@ -660,11 +660,11 @@ get_adjacency_matrix <- function(overlap_sources_and_targets_column){
 
 overlap_targets <- function(differential_gene_expression_set, target_sources, node_type, summarise_col){
   differential_gene_expression_set %>% 
-    rename(!!node_type := target_id) %>% 
+    dplyr::rename(!!node_type := target_id) %>% 
     right_join(target_sources, by = node_type) %>% 
     drop_na() %>% 
-    rename(!!paste0(node_type, '_', summarise_col) := paste0(summarise_col, '_mean')) %>% 
-    rename(!!paste0(node_type, '_mean_counts') := mean_counts)
+    dplyr::rename(!!paste0(node_type, '_', summarise_col) := paste0(summarise_col, '_mean')) %>% 
+    dplyr::rename(!!paste0(node_type, '_mean_counts') := mean_counts)
 }
 
 
@@ -672,11 +672,11 @@ overlap_targets <- function(differential_gene_expression_set, target_sources, no
 
 overlap_sources <- function(differential_gene_expression_set, edges, node_type, summarise_col){
   differential_gene_expression_set %>% 
-    rename(!!node_type := target_id) %>%
+    dplyr::rename(!!node_type := target_id) %>%
     left_join(edges, by = node_type) %>% 
     drop_na() %>% 
-    rename(!!paste0(node_type, '_', summarise_col) := paste0(summarise_col, '_mean')) %>% 
-    rename(!!paste0(node_type, '_mean_counts') := mean_counts)
+    dplyr::rename(!!paste0(node_type, '_', summarise_col) := paste0(summarise_col, '_mean')) %>% 
+    dplyr::rename(!!paste0(node_type, '_mean_counts') := mean_counts)
 }
 
 
@@ -684,7 +684,7 @@ overlap_sources <- function(differential_gene_expression_set, edges, node_type, 
 
 average_counts_across_comparison_sets <- function(est_count_set){
   est_count_set %>% 
-    rename(target_id = 1, counts = 2, counts1 = 4) %>% 
+    dplyr::rename(target_id = 1, counts = 2, counts1 = 4) %>% 
     select(ends_with('id'), contains('counts')) %>% 
     mutate(
       mean_counts = map2_dbl(counts, counts1, ~mean(x = c(.x, .y)))
@@ -722,10 +722,10 @@ paste_groups_to_join_with_title_extract <- function(column_one, column_two){
 associate_expression_to_comparison_elements <- function(replicate_set_association, comparisons){
   comparisons %>% 
     inner_join(replicate_set_association, by = c('group1' = 'condition')) %>%
-    rename(group1_replicate_data = replicate_data) %>% 
+    dplyr::rename(group1_replicate_data = replicate_data) %>% 
     
     left_join(replicate_set_association, by = c('group2' = 'condition')) %>%
-    rename(group2_replicate_data = replicate_data)
+    dplyr::rename(group2_replicate_data = replicate_data)
 }
 
 
@@ -739,9 +739,9 @@ associate_comparison_elements <- function(extracted_title_dataset, number_of_col
   
   extracted_title_dataset %>% 
     select(extract_title) %>% 
-    extract(col = extract_title, 
-            into = rep('id', times = number_of_columns) %>% paste(1:number_of_columns, sep = ''), 
-            regex = rep('(.*)', times = number_of_columns) %>% paste(collapse = '_')) %>% 
+    tidyr::extract(col = extract_title, 
+                   into = rep('id', times = number_of_columns) %>% paste(1:number_of_columns, sep = ''), 
+                   regex = rep('(.*)', times = number_of_columns) %>% paste(collapse = '_')) %>% 
     
     unite(col = group1, rep('id', times = (mid)) %>% paste0(start:mid), sep = ' ') %>% 
     unite(col = group2, rep('id', times = (mid)) %>% paste0(mid_right:number_of_columns), sep = ' ') %>% 
@@ -756,7 +756,7 @@ clean_design_matrix <- function(dm, p){
   covars <- p$sample_covariates
   dm %>% 
     read_csv(col_types = cols()) %>% 
-    extract(condition, 
+    tidyr::extract(condition, 
             into = str_split(pattern = ', ', covars) %>% unlist(),
             regex = '(.*) (.*) ([[:digit:]].*)')
 }
@@ -785,7 +785,7 @@ associate_replicate_sets_to_conditions <- function(expression_data_location, cle
     select(count_data, condition) %>% 
     group_by(condition) %>% 
     nest() %>% 
-    rename(replicate_data = data)
+    dplyr::rename(replicate_data = data)
 }
 
 
@@ -795,7 +795,7 @@ read_tsv_filter_extraneous <- function(current, s){
   # s: skip lines
   current %>% 
     read_tsv(file = ., col_names = T, skip = s, col_types = cols()) %>% 
-    rename(target_id = 1, est_counts = 2) %>% 
+    dplyr::rename(target_id = 1, est_counts = 2) %>% 
     mutate(
       target_id = str_remove(string = target_id, '\\..*')
     ) %>% 
@@ -809,10 +809,10 @@ read_tsv_filter_extraneous <- function(current, s){
 associate_expression_to_comparison_elements <- function(replicate_set_association, comparisons){
   comparisons %>% 
     inner_join(replicate_set_association, by = c('group1' = 'condition')) %>%
-    rename(group1_replicate_data = replicate_data) %>% 
+    dplyr::rename(group1_replicate_data = replicate_data) %>% 
     
     left_join(replicate_set_association, by = c('group2' = 'condition')) %>%
-    rename(group2_replicate_data = replicate_data)
+    dplyr::rename(group2_replicate_data = replicate_data)
 }
 
 
@@ -833,7 +833,7 @@ extract_condition_column_number <- function(extracted_title_dataset){
 unique_and_relabel <- function(edges, label_name){ 
   edges %>%
     distinct(!!sym(label_name)) %>% 
-    rename(label = !!label_name)
+    dplyr::rename(label = !!label_name)
 }
 
 extract_edges <- function(field){
@@ -1628,7 +1628,7 @@ DREM_main <- function(pipeline_input, wgcna_input, sig, exec){
   
   
   design_matrix <- design_matrix %>% 
-    read_csv(col_types = cols()) %>% 
+    read_csv(col_types = cols()) %>%
     dplyr::select(sample, condition, which_replicate)
   
   
@@ -1747,6 +1747,15 @@ load_read_data <- function(map_dir, dm, dataset){
 
 
 
+clean_target_id <- function(data){
+  data %>% 
+    select(target_id = 1, counts = 2) %>% 
+    mutate(
+      target_id = str_remove(target_id, '\\..*')
+    )
+}
+
+
 
 # Function name: rearrange_count_data
 # Purpose: Create data sets formatted for DREM.
@@ -1755,17 +1764,12 @@ load_read_data <- function(map_dir, dm, dataset){
 rearrange_count_data <- function(reads, covars){
   
   reads2 <- reads %>% 
-    extract(condition, 
+    tidyr::extract(condition, 
             into = str_split(pattern = ', ', covars) %>% unlist(),
             regex = '(.*) (.*) ([[:digit:]].*)') %>% 
     mutate(
-      reads = map(reads, 
-                  ~rename(.x, target_id = 1, counts = 2) %>% 
-                    mutate(
-                      target_id = target_id %>% 
-                        str_remove(pattern = '\\..*')
-                      
-                    )
+      reads = purrr::map(reads,
+                         clean_target_id
       )
     )
   
@@ -1857,16 +1861,19 @@ write_default_files <- function(reformatted_counts, defaults_template){
   
   nest_on_genotype <- reformatted_counts %>%
     
-    # Write DREM defaults for genotype/condition groups. 
-    nest(data = c(which_replicate, data, file_name)) %>% 
-    
+    select(genotype, condition, which_replicate, file_name) %>% 
+    group_by(genotype, condition) %>% 
+    nest() %>% 
+    select(write_data = data) %>% 
+    ungroup() %>% 
+ 
     mutate(
-      new_default_file = map(data,
+      new_default_file = map(write_data,
                              insert_DREM_input_to_defaults,
                              defaults_file
       ),
       new_default_file_name = pmap_chr(
-        list(genotype, condition, data),  
+        list(genotype, condition, write_data),  
         write_new_default_file_name
       )
     )
@@ -1890,7 +1897,7 @@ write_default_files <- function(reformatted_counts, defaults_template){
 insert_DREM_input_to_defaults <- function(condition_data, defaults_file){
   
   # Max replicates.
-  total_replicates <- condition_data %>% 
+  total_replicates <- condition_data %>%
     select(which_replicate) %>%
     max()
   
@@ -1900,14 +1907,13 @@ insert_DREM_input_to_defaults <- function(condition_data, defaults_file){
     select(file_name) 
   
   defaults_file <- defaults_file %>% 
-    rename(a = 1, b = 2)
+    select(a = 1, b = 2)
   
-  defaults_file$b[3] <- replicate_file %>% 
-    slice(1)
+  defaults_file$b[3] <- replicate_file[1, 1] %>% 
+    pull()
   
-  defaults_file$b[12] <- replicate_file %>% 
-    slice(2:total_replicates) %>% 
-    unlist(use.names = FALSE) %>% 
+  defaults_file$b[12] <- replicate_file[c(2:total_replicates), 1] %>% 
+    pull() %>% 
     str_c(collapse = ',')
   
   return(defaults_file %>% unnest(b))
