@@ -114,8 +114,6 @@ Below are the steps to run NetSeekR.
 
  
 `implement_differential_gene_expression(alignment_results)`
-
- * **note:** Sleuth is not available on the latest version of Bioconductor (3.10)
  
  7. Network analysis is then conducted assuming sets of differentially expressed genes are available.
  
