@@ -15,7 +15,7 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
   if(alignment_tool %>% str_detect('kallisto|KALLISTO|Kallisto')){
     wgcna_input <- alignment_decision %>% 
       filter(key == 'kallisto') %>% 
-      select(directories) %>% 
+      dplyr::select(directories) %>% 
       unlist(use.names = FALSE) %>% 
       first() %>% 
       str_replace('Kallisto', paste0('Sleuth/', pipeline_input %>% extract2('analysis_type'), '/gene_level/gene_level_results'))
@@ -35,10 +35,10 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
     
     test_for_extraneous <- deg_files %>% 
       use_series(deg_file) %>% 
-      first() %>% 
+      dplyr::first() %>% 
       read_tsv(col_types = cols()) %>%
       use_series(target_id) %>% 
-      first() %>% 
+      dplyr::first() %>% 
       unlist(use.names = FALSE)
     
     # str matching specific to test data.
@@ -66,7 +66,7 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
   expr2 <- wgcna_input_data(wgcna_input, pipeline_input) 
   
   significant_hits <- expr2 %>% 
-    select(original_filter) %>% 
+    dplyr::select(original_filter) %>% 
     unnest(cols = original_filter) %>% 
     distinct()
   
@@ -97,9 +97,9 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
   
   adjacency_matrices <- expr2 %>% 
     mutate(
-      comparison_adj_mat = map(clustering, ~.x$adjacency)
+      comparison_adj_mat = map(clustering_res, ~.x$adjacency)
     ) %>% 
-    select(comparison, comparison_adj_mat) %>% 
+    dplyr::select(comparison, comparison_adj_mat) %>% 
     mutate(
       gene_tf = map(comparison_adj_mat, map_gene_tf_network_analysis, pipeline_input)
     )
@@ -114,6 +114,7 @@ implement_network_analysis <- function(alignment_tool, alignment_results, exectu
 
 map_gene_tf_network_analysis <- function(adj_mat, pipeline_input){
   
+  previous <- getwd()
   setwd(paste0(getwd(), '/data/DREM/', pipeline_input$analysis_type))
   
   paths <- getwd() %>% 
@@ -121,43 +122,44 @@ map_gene_tf_network_analysis <- function(adj_mat, pipeline_input){
     tibble(path_file = .) %>% 
     dplyr::mutate(
       path_data = map(path_file, vroom, col_types = cols()),
-      path_data = map(path_data, ~select(.x, !contains('SPOT') & !starts_with('H'))),
+      path_data = map(path_data, ~dplyr::select(.x, !contains('SPOT') & !starts_with('H'))),
       path_data = map(path_data, ~set_colnames(.x, gsub("\\|.*","", colnames(.x))))
-    ) 
+    ) %>%
+    use_series(path_data) %>% 
+    map(make_unique) %>% 
+    bind_rows()
   
-  tf_list <- '../../../Ath_TF_list.txt'
+  tf_list <- pipeline_input$tf_list
   
-  paths <- paths %>% 
-    mutate(
-      tmp = purrr::map(path_data, 
-                       gene_tf_network_analysis, 
-                       adj_mat, 
-                       tf_list
-      )
-    )
+  gene_tf_network_analysis(paths, adj_mat, tf_list) 
   
+  setwd(previous)
+}
+
+
+
+make_unique <- function(tib){
+  new_names <- tib %>% 
+    names() %>% 
+    make.unique('_')
+  names(tib) <- new_names
+  return(tib)
   
 }
 
-  
-  
+
 
 
 gene_tf_network_analysis <- function(drem_gene_tf, adj_mat, tf_list){
   
-  #drem_gene_tf=read.table("gene_tf_table.txt",header = TRUE)
- 
-  
-  
-  
   ids = drem_gene_tf %>% 
-    select(1) 
+    use_series(target_id) %>% 
+    make.names(unique = T)
   
   drem_gene_tf <- as.data.frame(drem_gene_tf)
-  
-  
-  rownames(drem_gene_tf)=drem_gene_tf[,1]
-  drem_gene_tf<- drem_gene_tf[,-1]
+  #new_names <- drem_gene_tf[,1] %>% unique()
+  rownames(drem_gene_tf) = ids
+  drem_gene_tf <- drem_gene_tf[,-1]
   rr=drem_gene_tf[rowSums(drem_gene_tf)>2,]
   rr=rr[,colSums(rr)>2]
   
@@ -173,15 +175,9 @@ gene_tf_network_analysis <- function(drem_gene_tf, adj_mat, tf_list){
   #tk_rotate(tkp.id, degree = -90, rad = NULL)
   
   
-  types_drem <- V(g)$type                 ## getting each vertex `type` let's us sort easily
-  degree_drem <- igraph::degree(g)
-  betweenness_drem<- betweenness(g)
-  closeness_drem <- closeness(g)
-  eig_drem <- eigen_centrality(g)$vector
   
-  centrality_drem <- data.frame(types_drem , degree_drem, betweenness_drem, closeness_drem, eig_drem)
   
-  centrality_drem[order(centrality_drem$types_drem, decreasing = TRUE),]
+  #centrality_drem[order(centrality_drem$types_drem, decreasing = TRUE),]
   
   #adj_m <- adj_mat[(rownames(adj_mat)%in% ids),]
   
@@ -211,7 +207,7 @@ gene_tf_network_analysis <- function(drem_gene_tf, adj_mat, tf_list){
   tf_names<-colnames(data_tf_gene_corr)
   i<-genes_names[1:dim(m)[1]]
   j<-tf_names[1:dim(m)[2]]
-
+  
   for(gene in i)
   {
     for(gen in j)
@@ -225,9 +221,7 @@ gene_tf_network_analysis <- function(drem_gene_tf, adj_mat, tf_list){
   }
   
   
-  
   NetworkData <- data.frame(source_node, target_node, correlation)
-  
   
   net=NetworkData %>% filter(correlation > 0.5)
   net=net %>% filter(correlation != 1)
@@ -244,58 +238,44 @@ gene_tf_network_analysis <- function(drem_gene_tf, adj_mat, tf_list){
   
   rr=get.incidence(g,attr = "weight")
   
-  
-  
   V(g)$color <- V(g)$type
   V(g)$color=gsub("FALSE","red",V(g)$color)
   V(g)$shape=gsub("FALSE","square",V(g)$shape)
   V(g)$color=gsub("TRUE","blue",V(g)$color)
   tkplot(g, edge.color="gray30",edge.width=E(g)$weight, layout=layout_as_bipartite)
   
+  #finding histogram of node gree
+  degree_nodes <- degree(g, mode="all")
+  V(g)$size <- degree_nodes
+  hist(degree_nodes, breaks=1:150, main="Histogram of node degree")
+  degree.distribution <- degree_distribution(g, cumulative=T, mode="all")
   
-  types <- V(g)$type    
-  deg <- igraph::degree(g)
-  bet <- betweenness(g)
-  clos <- closeness(g)
-  eig <- eigen_centrality(g)$vector
+  plot( x=0:max(degree_nodes), y=1-degree.distribution, pch=19, cex=1.2, col="orange", 
+        
+        xlab="Degree_of_nodes", ylab="Cumulative Frequency")
   
-  cent_df <- data.frame(types, deg, bet, clos, eig)
   
-  cent_df[order(cent_df$type, decreasing = TRUE),]
+  
+  
+  #finding centralities
+  types_drem <- V(g)$type    
+  deg_drem <- igraph::degree(g)
+  bet_drem <- betweenness(g)
+  clos_drem <- closeness(g)
+  eig_drem <- eigen_centrality(g)$vector
+  
+  cent_df_drem <- data.frame(types_drem, deg_drem, bet_drem, clos_drem, eig_drem)
+  
+  cent_df_drem[order(cent_df_drem$type_drem, decreasing = TRUE),]
+  #finding clusters based on Edge betweenness
+  ceb <- cluster_edge_betweenness(g)
+  #finding hubs score of each gene
+  hs <- hub_score(g, weights=NA)$vector
+  
 }
-  
-  #quantile foreach gene -TF relationship
-  # q <- vector()
-  # for (i in 1:length(data_tf_gene_corr)){
-  #   q[i]<- quantile(data_tf_gene_corr[,i],  probs = 0.9)
-  #   
-  # }
-  # 
-  
-  
-  
-  
-  # adj_mat=read.table("gene-gene_adj.txt",header = TRUE)
-  # row.names(adj_mat)=adj_mat$Column1
-  # adj_mat=adj_mat[,-1]
-  # 
-  # 
-  # row.names(adj_mat)=adj_mat$Column1
-  # adj_mat=adj_mat[,-1]
-  # 
-  #adj<-as.data.frame(adjacency)
-  #adj<-adj_mat
-  
-  #since DREM filters some data so we will keep the genes that are not filtered by DREM
-  #drem_gene_tf=read.table("ILK_path1.txt",header = TRUE)
-  #drem_gene_tf = select_if(!contains('SPOT', 'H[[:digit:]]+'))
-    
-    
-    #drem_gene_tf[,-(2:6)]
-  
-  #colnames(paths$path_data[[1]]) = gsub("\\|.*","", colnames(paths$path_data[[1]]))
-  
-  
+
+
+
 
 
 
@@ -327,7 +307,7 @@ DREM_network_overlap <- function(p, d){
     filter(x)
   
   nets <- net_full_tib %>% 
-    select(f) %>% 
+    dplyr::select(f) %>% 
     unlist(use.names = F)
   
   # invite user to select network
@@ -345,7 +325,7 @@ DREM_network_overlap <- function(p, d){
   # extract network file name
   net <- net_select %>% 
     spread(item, network) %>% 
-    select(all_of(chosen_item))
+    dplyr::select(all_of(chosen_item))
   
   # extract full path to network chosen
   path_to_chosen_net <- net_full[str_detect(net_full, net %>% unlist(use.names = F))]
@@ -390,14 +370,14 @@ DREM_network_overlap <- function(p, d){
       de_gene_sets = map(deg_file, ~read_tsv(.x, col_types = cols()) %>% 
                            drop_na() %>% 
                            filter(!!sym(pval_filter) <= p %>% extract2('significance_cutoff'))
-                        
+                         
       ),
       summarised_de_gene_sets = map(de_gene_sets, 
                                     ~summarise_differential_expression(differential_expression_gene_set = .x, gene_column = gene_col, mean_summerize = summarise_by)
       ),
       extract_title = map_chr(deg_file, extract_title_from_file_name)
     ) %>% 
-    select(-de_gene_sets)
+    dplyr::select(-de_gene_sets)
   # unzip if needed
   # if (str_detect(string = path_to_chosen_net, '.gz$')){
   #   unzip(zipfile = path_to_chosen_net)
@@ -405,7 +385,7 @@ DREM_network_overlap <- function(p, d){
   # }
   
   network <- read.delim(path_to_chosen_net) %>% 
-    select(all_of(target_source), all_of(target))
+    dplyr::select(all_of(target_source), all_of(target))
   # Make network edges unique.
   edge_list <- network %>% 
     mutate(
@@ -476,7 +456,7 @@ DREM_network_overlap <- function(p, d){
     
     dplyr::right_join(comparison_set_expression, by = 'extract_title') %>% 
     
-    select(-contains('group')) %>% 
+    dplyr::select(-contains('group')) %>% 
     
     mutate(
       
@@ -498,7 +478,7 @@ DREM_network_overlap <- function(p, d){
       
       
       # Collect edge information.
-      edges = map(!!sym(overlap_sources_and_targets_column), ~select(.x, matches('from|to'))),
+      edges = map(!!sym(overlap_sources_and_targets_column), ~dplyr::select(.x, matches('from|to'))),
       
       # ID the nodes within each set.
       relabel_nodes = map(!!sym(overlap_sources_and_targets_column), ~relabel_local_nodes(local_edges = .x, target_sources = target_source, targets = target)),
@@ -570,7 +550,7 @@ label_and_rescale_mapped_values <- function(mapped_values_set, edges, first_labe
   
   # Extract value range for scaling. 
   rescale_set <- mapped_values_set %>%
-    select(beta) %>%
+    dplyr::select(beta) %>%
     range()
   
   
@@ -620,7 +600,7 @@ beta_and_read_mapping_to_nodes <- function(target_source_set, node_type_1, node_
       tmp = map(tmp, gather) 
     ) %>% 
     unnest(cols = c(tmp)) %>% 
-    select(value) %>% 
+    dplyr::select(value) %>% 
     mutate(
       ind = rep(c(1,2,3), length.out = n())
     ) %>% 
@@ -639,7 +619,7 @@ beta_and_read_mapping_to_nodes <- function(target_source_set, node_type_1, node_
 
 relabel_local_nodes <- function(local_edges, target_sources, targets){
   local_edges %>% 
-    select(target_sources, targets) %>% 
+    dplyr::select(target_sources, targets) %>% 
     unlist(use.names = FALSE) %>% 
     tibble(name = .) %>% 
     distinct() %>% 
@@ -649,7 +629,7 @@ relabel_local_nodes <- function(local_edges, target_sources, targets){
 
 get_adjacency_matrix <- function(overlap_sources_and_targets_column){
   overlap_sources_and_targets_column %>%
-    select(to, from) %>%
+    dplyr::select(to, from) %>%
     as.data.frame() %>%
     graph.data.frame() %>%
     get.adjacency() %>%
@@ -685,11 +665,11 @@ overlap_sources <- function(differential_gene_expression_set, edges, node_type, 
 average_counts_across_comparison_sets <- function(est_count_set){
   est_count_set %>% 
     dplyr::rename(target_id = 1, counts = 2, counts1 = 4) %>% 
-    select(ends_with('id'), contains('counts')) %>% 
+    dplyr::select(ends_with('id'), contains('counts')) %>% 
     mutate(
       mean_counts = map2_dbl(counts, counts1, ~mean(x = c(.x, .y)))
     ) %>% 
-    select(target_id, mean_counts)
+    dplyr::select(target_id, mean_counts)
 }
 
 
@@ -738,7 +718,7 @@ associate_comparison_elements <- function(extracted_title_dataset, number_of_col
   mid_right <- round(mid) + 1
   
   extracted_title_dataset %>% 
-    select(extract_title) %>% 
+    dplyr::select(extract_title) %>% 
     tidyr::extract(col = extract_title, 
                    into = rep('id', times = number_of_columns) %>% paste(1:number_of_columns, sep = ''), 
                    regex = rep('(.*)', times = number_of_columns) %>% paste(collapse = '_')) %>% 
@@ -757,8 +737,8 @@ clean_design_matrix <- function(dm, p){
   dm %>% 
     read_csv(col_types = cols()) %>% 
     tidyr::extract(condition, 
-            into = str_split(pattern = ', ', covars) %>% unlist(),
-            regex = '(.*) (.*) ([[:digit:]].*)')
+                   into = str_split(pattern = ', ', covars) %>% unlist(),
+                   regex = '(.*) (.*) ([[:digit:]].*)')
 }
 
 
@@ -782,7 +762,7 @@ associate_replicate_sets_to_conditions <- function(expression_data_location, cle
     left_join(y = clean_dm, by = 'sample') %>% 
     dplyr::select(files, count_data, sample, all_of(tmp)) %>%
     tidyr::unite(col = condition, tmp, sep = ' ') %>% 
-    select(count_data, condition) %>% 
+    dplyr::select(count_data, condition) %>% 
     group_by(condition) %>% 
     nest() %>% 
     dplyr::rename(replicate_data = data)
@@ -819,11 +799,11 @@ associate_expression_to_comparison_elements <- function(replicate_set_associatio
 
 extract_condition_column_number <- function(extracted_title_dataset){
   extracted_title_dataset %>% 
-    select(extract_title) %>% 
+    dplyr::select(extract_title) %>% 
     mutate(
       column_number = map_dbl(extract_title, ~str_count(.x, '_') %>% add(1) %>% as.numeric())
     ) %>% 
-    select(column_number) %>% 
+    dplyr::select(column_number) %>% 
     unlist(use.names = FALSE) %>% 
     unique()
 }
@@ -858,6 +838,10 @@ extract_title_from_file_name <- function(file_name){
     basename() %>% 
     str_remove('_results[[:punct:]].*')
 }
+
+
+
+
 
 # Function name: wgcna_input_data
 # Purpose: Takes the input data and convert it into 
@@ -942,7 +926,7 @@ wgcna_input_data <- function(differentialy_expressed_genes, pipeline_input){
       )
     )
   
-
+  
 }
 
 
@@ -984,22 +968,22 @@ filter_counts_data_wgcna <- function(counts, design_matrix){
   
   # Check for Kallisto data.
   is_kallisto <- counts %>% 
-    slice(1) %>% 
-    select(files) %>% 
+    dplyr::slice(1) %>% 
+    dplyr::select(files) %>% 
     str_detect('Kallisto_quantifications')
   
   # Cut extra statistics, leaving only the count data
   # for genes. 
   if(is_kallisto){
     gene_names <- counts %>% 
-      slice(1) %>% 
-      select(sample_count_data) %>% 
+      dplyr::slice(1) %>% 
+      dplyr::select(sample_count_data) %>% 
       unnest(sample_count_data) %>% 
-      select(gene)
+      dplyr::select(gene)
     
     counts <- counts %>% 
       mutate(
-        sample_count_data = map(sample_count_data, reset_splice_variants, gene_names = gene_names)
+        sample_count_data = purrr::map(sample_count_data, reset_splice_variants, gene_names = gene_names)
       )
   }
   
@@ -1039,7 +1023,7 @@ reset_splice_variants <- function(sample_counts, gene_names){
       target_id = gene_names %>% 
         unlist(use.names = F)
     ) %>% 
-    select(target_id, est_counts)
+    dplyr::select(target_id, est_counts)
 }
 
 
@@ -1120,7 +1104,7 @@ read_and_filter <- function(differentialy_expressed_genes_sets, filter_value, pi
     read_tsv(col_types = cols()) %>% 
     drop_na() %>% 
     filter(!!sym(filter_value) <= pipeline_input$significance_cutoff) %>% 
-    select(target_id)
+    dplyr::select(target_id)
 }
 
 
@@ -1315,9 +1299,9 @@ plot_power_histogram <- function(sample_clustering, comparison){
 wgcna_clustering <- function(sample_clustering){
   sample_clustering %>% 
     mutate(
-      clustering = map2(sample_clustering,
-                        files, 
-                        clustering)
+      clustering_res = map2(sample_clustering,
+                            files, 
+                            clustering)
     )
   
 }
@@ -1424,7 +1408,7 @@ implement_GO_enrichment <- function(deg_tool, alignment_results){
   if(deg_tool %>% str_detect('Sleuth')){
     deg_input <- alignment_decision %>% 
       filter(key == 'kallisto') %>% 
-      select(directories) %>% 
+      dplyr::select(directories) %>% 
       unlist(use.names = FALSE) %>% 
       first() %>% 
       str_replace('Kallisto', paste0('Sleuth/', pipeline_input$analysis_type, '/gene_level/gene_level_results'))
@@ -1655,7 +1639,7 @@ DREM_main <- function(pipeline_input, wgcna_input, sig, exec){
   
   # Write batch DREM to script. 
   DREM_execute <- time_series_count_data %>% 
-    select(new_default_file_name) %>% 
+    dplyr::select(new_default_file_name) %>% 
     mutate(
       command = map_chr(new_default_file_name,
                         ~paste(DREM_command_line, .x)
@@ -1664,7 +1648,7 @@ DREM_main <- function(pipeline_input, wgcna_input, sig, exec){
         str_replace('.txt$', '_outfile.txt'),
       command_complete = paste(command, file)
     ) %>% 
-    select(command_complete) %>% 
+    dplyr::select(command_complete) %>% 
     unlist(use.names = F)
   
   drem_script_location <- getwd() %>% 
@@ -1749,7 +1733,7 @@ load_read_data <- function(map_dir, dm, dataset){
 
 clean_target_id <- function(data){
   data %>% 
-    select(target_id = 1, counts = 2) %>% 
+    dplyr::select(target_id = 1, counts = 2) %>% 
     mutate(
       target_id = str_remove(target_id, '\\..*')
     )
@@ -1765,8 +1749,8 @@ rearrange_count_data <- function(reads, covars){
   
   reads2 <- reads %>% 
     tidyr::extract(condition, 
-            into = str_split(pattern = ', ', covars) %>% unlist(),
-            regex = '(.*) (.*) ([[:digit:]].*)') %>% 
+                   into = str_split(pattern = ', ', covars) %>% unlist(),
+                   regex = '(.*) (.*) ([[:digit:]].*)') %>% 
     mutate(
       reads = purrr::map(reads,
                          clean_target_id
@@ -1793,7 +1777,7 @@ rearrange_count_data <- function(reads, covars){
         str_remove('[a-zA-Z]') %>% 
         str_replace('^', 'H')
     ) %>% 
-    select(-file, -sample) %>% 
+    dplyr::select(-file, -sample) %>% 
     
     # Associate each condition with a time series from the expression data. 
     unnest(reads) %>% 
@@ -1804,7 +1788,7 @@ rearrange_count_data <- function(reads, covars){
     spread(hour, 
            counts) %>%
     ungroup() %>% 
-    select(genotype,
+    dplyr::select(genotype,
            condition, 
            which_replicate, 
            target_id, 
@@ -1861,12 +1845,12 @@ write_default_files <- function(reformatted_counts, defaults_template){
   
   nest_on_genotype <- reformatted_counts %>%
     
-    select(genotype, condition, which_replicate, file_name) %>% 
+    dplyr::select(genotype, condition, which_replicate, file_name) %>% 
     group_by(genotype, condition) %>% 
     nest() %>% 
-    select(write_data = data) %>% 
+    dplyr::select(write_data = data) %>% 
     ungroup() %>% 
- 
+    
     mutate(
       new_default_file = map(write_data,
                              insert_DREM_input_to_defaults,
@@ -1898,16 +1882,16 @@ insert_DREM_input_to_defaults <- function(condition_data, defaults_file){
   
   # Max replicates.
   total_replicates <- condition_data %>%
-    select(which_replicate) %>%
+    dplyr::select(which_replicate) %>%
     max()
   
   
   replicate_file <- condition_data %>% 
     ungroup() %>% 
-    select(file_name) 
+    dplyr::select(file_name) 
   
   defaults_file <- defaults_file %>% 
-    select(a = 1, b = 2)
+    dplyr::select(a = 1, b = 2)
   
   defaults_file$b[3] <- replicate_file[1, 1] %>% 
     pull()
@@ -1929,7 +1913,7 @@ write_new_default_file_name <- function(genotype, condition, drem_data){
   
   file_name <- drem_data %>% 
     ungroup() %>% 
-    select(file_name) %>% 
+    dplyr::select(file_name) %>% 
     first() %>% 
     str_replace('.tsv$', 'defaults.txt') %>% 
     first()
