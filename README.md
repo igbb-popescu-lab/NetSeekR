@@ -117,6 +117,6 @@ Below are the steps to run NetSeekR.
  
  7. Network analysis is then conducted assuming sets of differentially expressed genes are available.
  
- `implement_network_analysis(alignment_tool = 'edgeR', alignment_results = alignment_results)`
+ `implement_network_analysis(alignment_tool = 'star', alignment_results = alignment_results)`
  
  The network analysis function above will produce an image of the network. The image can be saved from the ‘Export’ tab at the top of the window.
